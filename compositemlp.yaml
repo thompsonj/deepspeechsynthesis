@@ -1,0 +1,55 @@
+!obj:pylearn2.train.Train {
+    dataset: &train !obj:research.code.pylearn2.datasets.timit.TIMIT {
+        which_set: 'train',
+        frame_length: 1,
+        frames_per_example: &fpe 100,
+        start: 0,
+        stop: 100,
+    },
+    model: !obj:mlp_with_source.MLPWithSource {
+        batch_size: 512,
+        layers: [
+            !obj:mlp_with_source.CompositeLayerWithSource {
+                layer_name: 'c',
+                layers: [
+                    !obj:pylearn2.models.mlp.Linear {
+                        layer_name: 'h1',
+                        dim: 100,
+                        irange: 0.05,
+                    },
+                    !obj:pylearn2.models.mlp.Linear {
+                        layer_name: 'h2',
+                        dim: 62,
+                        irange: 0.05,
+                    },
+                ],
+            },
+            !obj:pylearn2.models.mlp.Linear {
+                layer_name: 'o',
+                dim: 1,
+                irange: 0.05,
+            },
+        ],
+        input_space: !obj:pylearn2.space.CompositeSpace {
+            components: [
+                !obj:pylearn2.space.VectorSpace {
+                    dim: 100,
+                },
+                !obj:pylearn2.space.VectorSpace {
+                    dim: 62,
+                },
+            ],
+        },
+        input_source: ['features', 'phones'],
+    },
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        learning_rate: .01,
+        monitoring_dataset: {
+            'train': *train,
+        },
+        cost: !obj:pylearn2.costs.mlp.Default {},
+        termination_criterion: !obj:pylearn2.termination_criteria.EpochCounter {
+            max_epochs: 10,
+        },
+    },
+}
