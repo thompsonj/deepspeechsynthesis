@@ -1,0 +1,140 @@
+!obj:pylearn2.train.Train {
+    dataset: &train !obj:research.code.pylearn2.datasets.timit.TIMIT {
+        which_set: 'train',
+        frame_length: &fl 1,
+        frames_per_example: &fpe 200,
+        start: 0,
+        stop: 200,
+    },
+    model: !obj:dbm_with_source.DBMWithSource {
+        batch_size: 512,
+        # 1 mean field iteration reaches convergence in the RBM
+        niter: 1,
+        visible_layer:
+            !obj:dbm_with_source.CompositeLayerWithSource {
+                layer_name: 'c',
+                components: [
+                    !obj:pylearn2.models.dbm.GaussianVisLayer {
+                        #layer_name: 'h1',
+                        nvis: 200,
+                    },
+                    !obj:pylearn2.models.dbm.BinaryVector {
+                        #layer_name: 'h2',
+                        nvis: 62,
+                    },
+                ],
+            },
+        hidden_layers: [
+            !obj:pylearn2.models.dbm.BinaryVectorMaxPool {
+                layer_name: 'o1',
+                detector_layer_dim: 500, # must be multiple of pool_size
+                pool_size: 1, # fails when this is greater than 1, why? assert all([len(elem) == 2 for elem in [state, target, coeff]]) 
+                # pool_rows: 1,
+                # pool_cols: 6,
+                # We initialize the weights by drawing them from W_ij ~ U(-irange, irange)
+                irange: .05,
+                # We initialize all the biases of the hidden units to a negative
+                # number. This helps to learn a sparse representation.
+                init_bias: -2.,
+            },
+            !obj:pylearn2.models.dbm.BinaryVectorMaxPool {
+                layer_name: 'o2',
+                detector_layer_dim: 100, # must be multiple of pool_size
+                pool_size: 1, # fails when this is greater than 1, why? assert all([len(elem) == 2 for elem in [state, target, coeff]]) 
+                # pool_rows: 1,
+                # pool_cols: 6,
+                # We initialize the weights by drawing them from W_ij ~ U(-irange, irange)
+                irange: .05,
+                # We initialize all the biases of the hidden units to a negative
+                # number. This helps to learn a sparse representation.
+                init_bias: -2.,
+            },
+        ],
+        input_space: !obj:pylearn2.space.CompositeSpace {
+            components: [
+                !obj:pylearn2.space.VectorSpace {
+                    dim: 200,
+                },
+                !obj:pylearn2.space.VectorSpace {
+                    dim: 62,
+                },
+            ],
+        },
+        input_source: ['features', 'phones'],
+    },
+    algorithm: !obj:pylearn2.training_algorithms.sgd.SGD {
+        # We initialize the learning rate and momentum here. Down below
+        # we can control the way they decay with various callbacks.
+        learning_rate: 1e-3,
+        # Compute new model parameters using SGD + Momentum
+        learning_rule: !obj:pylearn2.training_algorithms.learning_rule.Momentum {
+            init_momentum: 0.5,
+        },
+        # These arguments say to compute the monitoring channels on 10 batches
+        # of the training set.
+        monitoring_batches: 10,
+        monitoring_dataset: {
+            train: *train,
+            valid: !obj:research.code.pylearn2.datasets.timit.TIMIT {
+                which_set: 'valid',
+                frame_length: *fl,
+                frames_per_example: *fpe
+            },
+            test: !obj:research.code.pylearn2.datasets.timit.TIMIT {
+                which_set: 'test',
+                frame_length: *fl,
+                frames_per_example: *fpe
+            }
+        },
+        # The SumOfCosts allows us to add together a few terms to make a complicated
+        # cost function.
+        cost : !obj:pylearn2.costs.cost.SumOfCosts {
+        costs: [
+                # The first term of our cost function is variational PCD.
+                # For the RBM, the variational approximation is exact, so
+                # this is really just PCD. In deeper models, it means we
+                # use mean field rather than Gibbs sampling in the positive phase.
+                !obj:pylearn2.costs.dbm.VariationalPCD {
+                   # Here we specify how many fantasy particles to maintain
+                   num_chains: 100,
+                   # Here we specify how many steps of Gibbs sampling to do between
+                   # each parameter update.
+                   num_gibbs_steps: 5
+                },
+                # The second term of our cost function is a little bit of weight
+                # decay.
+                !obj:pylearn2.costs.dbm.WeightDecay {
+                  coeffs: [ .0001  ]
+                },
+                # Finally, we regularize the RBM to sparse, using a method copied
+                # from Ruslan Salakhutdinov's DBM demo
+                !obj:pylearn2.costs.dbm.TorontoSparsity {
+                 targets: [ .2 ],
+                 coeffs: [ .001 ],
+                }
+               ],
+        },
+           # We tell the RBM to train for 300 epochs
+           termination_criterion: !obj:pylearn2.termination_criteria.EpochCounter { max_epochs: 300 },
+           update_callbacks: [
+                # This callback makes the learning rate shrink by dividing it by decay_factor after
+                # each sgd step.
+                !obj:pylearn2.training_algorithms.sgd.ExponentialDecay {
+                        decay_factor: 1.000015,
+                        min_lr:       0.0001
+                }
+           ]
+        },
+    extensions: [
+            # This callback makes the momentum grow to 0.9 linearly. It starts
+            # growing at epoch 5 and finishes growing at epoch 6.
+            !obj:pylearn2.training_algorithms.learning_rule.MomentumAdjustor {
+                final_momentum: .9,
+                start: 5,
+                saturate: 6
+            },
+    ],
+    save_path: "DeepCompositeDBM_sumofcosts.pkl",
+    # This says to save it every epoch
+    save_freq : 1
+}
